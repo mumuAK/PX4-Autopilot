@@ -157,6 +157,105 @@ private:
 };
 
 // ============================================
+// 复飞状态机 (Go-Around State Machine)
+// ============================================
+enum class GoAroundPhase {
+    INITIAL_ROTATION,     // 初始抬头阶段 (0-3s)
+    CLIMB_OUT_V2,         // 初始爬升，保持 V2+10 (离地 - 400ft)
+    ACCELERATION,         // 加速阶段，准备收襟翼 (400ft - 1500ft)
+    CLIMB_OUT,            // 正常爬升 (1500ft - 3000ft)
+    TRANSITION_TO_CLIMB   // 过渡到正常爬升模式 (> 3000ft)
+};
+
+// ============================================
+// 复飞控制器 (Go-Around Controller)
+// ============================================
+class GoAroundController {
+public:
+    GoAroundController();
+    
+    // 激活复飞 - 需要提供飞机当前状态来初始化参数
+    void activate(const AircraftState& state);
+    void reset();
+    
+    // 主更新函数 - 计算俯仰/滚转/航向指令
+    void update(const AircraftState& state, float dt);
+    
+    // 获取当前阶段
+    GoAroundPhase getPhase() const { return _phase; }
+    const char* getPhaseName() const;
+    
+    // 获取控制指令
+    float getPitchCommand() const { return _pitch_cmd; }
+    float getRollCommand() const { return _roll_cmd; }
+    float getTargetSpeed() const { return _target_speed; }  // knots
+    float getTargetVerticalSpeed() const { return _target_vs; } // fpm
+    bool isFlapRetractionAllowed() const { return _allow_flap_retraction; }
+    bool isGearRetractionAllowed() const { return _allow_gear_retraction && _positive_climb_established; }
+    
+    // 状态检查
+    bool isActive() const { return _is_active; }
+    bool isCompleted() const { return _phase == GoAroundPhase::TRANSITION_TO_CLIMB; }
+    
+private:
+    bool _is_active;
+    float _time_since_activation;
+    
+    // 复飞参数
+    GoAroundPhase _phase;
+    float _initial_pitch_rate;     // deg/s 抬头速率
+    float _target_vs;               // fpm 目标垂直速度
+    float _target_speed;            // knots 目标空速 (V2 + 10)
+    float _target_pitch;            // rad 目标俯仰角
+    float _target_heading;          // deg 目标航向（复飞时保持）
+    float _initial_altitude_ft;     // ft  激活时的初始高度
+    bool  _positive_climb_established; // 已确认正爬升率
+    
+    // 控制指令
+    float _pitch_cmd;               // rad
+    float _roll_cmd;                // rad
+    
+    // 阶段管理标志
+    bool _allow_flap_retraction;    // 400ft AGL 以上允许收襟翼
+    bool _allow_gear_retraction;    // 1500ft AGL 以上允许收起落架
+    
+    // PID 控制器
+    struct PitchController {
+        float kp;
+        float ki;
+        float kd;
+        float integral;
+        float last_error;
+    } _pitch_controller;
+    
+    struct RollController {
+        float kp;
+        float ki;
+        float kd;
+        float integral;
+        float last_error;
+    } _roll_controller;
+    
+    // 阶段切换逻辑
+    void updatePhase(const AircraftState& state);
+    
+    // 控制计算
+    float computePitch(const AircraftState& state, float dt);
+    float computeRoll(const AircraftState& state, float dt);
+    
+    // 辅助计算
+    float computeTargetPitch(const AircraftState& state);
+    float computePitchForSpeed(float speed_error_knots);
+    float computePitchForAltitude(float altitude_error_ft);
+    float computePitchForVS(float vs_error_fpm);
+    float blendPitchCommands(float pitch_for_vs, float pitch_for_speed, float speed_error);
+    
+    // 限制器
+    float limitPitchForGoAround(float pitch, const AircraftState& state);
+    float limitPitchRate(float pitch_rate, float max_rate_deg_s = 5.0f);
+};
+
+// ============================================
 // 飞行控制计算机 (FlightControlComputer)
 // ============================================
 class FlightControlComputer {
@@ -172,8 +271,10 @@ public:
     void setTargetSpeed(float knots);
     void setTargetMach(float mach);
     
-    void activateGoAround();
+    // 改进的复飞接口
+    void activateGoAround(const AircraftState& state);
     bool isGoAroundActive() const { return _current_mode == AFMode::GO_AROUND; }
+    const GoAroundController& getGoAroundController() const { return _go_around; }
     
     ControlCommand computeControl(const AircraftState& state);
     
@@ -186,6 +287,9 @@ private:
     float _target_heading;    // 目标航向 (deg)
     float _target_speed;      // 目标空速 (knots)
     float _target_mach;       // 目标马赫数
+    
+    // 复飞控制器
+    GoAroundController _go_around;
     
     // 控制模式管理器
     bool _altitude_hold_active;
@@ -310,9 +414,16 @@ public:
     void setTargetSpeed(float knots);
     void setTargetMach(float mach);
     
-    // 复飞
-    void activateGoAround();
+    // 改进的复飞接口 - 需要当前状态初始化复飞程序
+    void activateGoAround(const AircraftState& state);
     bool isGoAroundActive() const { return _fcc.isGoAroundActive(); }
+    const GoAroundController& getGoAroundController() const { return _fcc.getGoAroundController(); }
+
+    // --- 复飞过程中的辅助信息（供外部查询、调试、记录） ---
+    float getGoAroundTargetSpeed() const;
+    float getGoAroundTargetVS() const;
+    const char* getGoAroundPhaseName() const;
+    bool isGoAroundCompleted() const;
     
     // 获取输出
     ControlCommand getControlCommand() const { return _control_command; }

@@ -156,27 +156,40 @@ int main() {
         this_thread::sleep_for(chrono::milliseconds((int)(dt * 1000)));
     }
     
-    // 模拟复飞
+    // 模拟复飞（模拟低空进近时触发复飞）
     cout << "\n--- Phase 4: Go Around ---" << endl;
-    afs.activateGoAround();
-    
+    state.alt_msl = 300.0f;
+    state.hagl   = 300.0f;   // 有离地高度时 state-machine 会优先使用 hagl
+    state.alt_std = 300.0f;
+    state.tas    = 75.0f;
+    state.cas    = 75.0f;
+    state.pitch  = 0.0f;
+    state.roll   = 0.0f;
+    afs.activateGoAround(state);  // 新接口：传入当前 state
+
     for (int i = 0; i < 50; i++) {
         afs.update(state);
         ControlCommand cmd = afs.getControlCommand();
-        
+
         state.thrust_left = cmd.throttle_cmd * 1000.0f;
         state.thrust_right = cmd.throttle_cmd * 1000.0f;
         state.n1_left = cmd.throttle_cmd;
         state.n1_right = cmd.throttle_cmd;
         state.pitch_rate = (cmd.pitch_cmd - state.pitch) * 2.0f;
-        
+        state.roll_rate  = (cmd.roll_cmd  - state.roll)  * 3.0f;
+
         updateAircraftState(state, dt);
         sim_time += dt;
-        
-        if (i % 10 == 0) {
+
+        if (i % 5 == 0) {
             printState(state, cmd);
+            cout << "GA Phase     : " << afs.getGoAroundPhaseName() << endl;
+            cout << "GA Target V/S: " << afs.getGoAroundTargetVS() << " fpm" << endl;
+            cout << "GA Target Spd: " << afs.getGoAroundTargetSpeed() << " knots" << endl;
+            cout << "Gear OK      : " << (afs.getGoAroundController().isGearRetractionAllowed() ? "YES" : "NO") << endl;
+            cout << "Flap OK      : " << (afs.getGoAroundController().isFlapRetractionAllowed() ? "YES" : "NO") << endl;
         }
-        
+
         this_thread::sleep_for(chrono::milliseconds((int)(dt * 1000)));
     }
     
