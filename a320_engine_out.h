@@ -120,6 +120,18 @@ public:
     bool isStabilized() const { return _phase == EngineFailurePhase::CRUISE ||
                                         _phase == EngineFailurePhase::CLIMB_OUT; }
 
+    /**
+     * @brief 检查左发是否失效
+     * @return true 表示左发失效
+     */
+    bool isLeftEngineFailed() const { return _left_engine_failed; }
+
+    /**
+     * @brief 检查右发是否失效
+     * @return true 表示右发失效
+     */
+    bool isRightEngineFailed() const { return _right_engine_failed; }
+
 private:
     bool _is_active;
     bool _left_engine_failed;

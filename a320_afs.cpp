@@ -96,8 +96,42 @@ void AutoFlightSystem::update(const AircraftState& state) {
         _control_command = cmd;
     }
 
-    if (_at_enabled) {
-        _control_command.throttle_cmd = _autothrottle.computeThrottle(state);
+    // 自动油门控制逻辑：
+    // - 单发失效模式：使用左右分别推力控制，AT 不干预
+    // - 复飞模式：使用固定 TO/GA 推力（95%），AT 不干预
+    // - 其他模式：正常 AT 速度/马赫控制
+    bool at_should_override = true;
+    if (_fcc.getAFMode() == AFMode::ENGINE_OUT) {
+        // 单发失效模式：使用左右分别推力
+        at_should_override = false;
+        float engine_out_thrust = _fcc.getEngineOutController().getTargetThrust();
+        if (_fcc.getEngineOutController().isLeftEngineFailed()) {
+            // 左发失效：右发 MCT，左发 0
+            _control_command.throttle_left = 0.0f;
+            _control_command.throttle_right = engine_out_thrust;
+        } else {
+            // 右发失效：左发 MCT，右发 0
+            _control_command.throttle_left = engine_out_thrust;
+            _control_command.throttle_right = 0.0f;
+        }
+    } else if (_fcc.getAFMode() == AFMode::GO_AROUND) {
+        // 复飞模式：使用固定推力
+        float speed_knots = state.cas * MS_TO_KNOTS;
+        if (speed_knots < 160.0f) {
+            at_should_override = true;
+        } else {
+            at_should_override = false;
+            // 两发都加到 TO/GA 推力
+            _control_command.throttle_left = 95.0f;
+            _control_command.throttle_right = 95.0f;
+        }
+    }
+
+    if (_at_enabled && at_should_override) {
+        float throttle = _autothrottle.computeThrottle(state);
+        _control_command.throttle_cmd = throttle;
+        _control_command.throttle_left = throttle;
+        _control_command.throttle_right = throttle;
     }
 
     enforceFlightEnvelope(state);

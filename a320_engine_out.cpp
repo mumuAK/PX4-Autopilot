@@ -168,14 +168,11 @@ float EngineOutController::computeAsymmetryCompensation(const AircraftState& sta
         state.thrust_left, state.thrust_right);
 
     // 计算需要的方向舵偏角
-    // 方向舵产生的侧力矩 = 方向舵偏角 × 速度 × 效率系数
+    // rudder_moment_per_deg 用于评估气动效率
     float speed_knots = state.cas * MS_TO_KNOTS;
     float rudder_effectiveness = Utils::interpolate(speed_knots, 100.0f, 250.0f, 0.5f, 1.0f);
-
-    // 每度方向舵产生的侧力矩（简化模型）
-    float rudder_moment_per_deg = 1000.0f * rudder_effectiveness;  // N·m/deg
-
-    float required_rudder_deg = asymmetry_moment / rudder_moment_per_deg;
+    float rudder_moment_per_deg = 1000.0f * rudder_effectiveness;
+    (void)rudder_moment_per_deg;  // 预留用于更精确的模型
 
     // PID 控制
     float proportional = _gains.asymmetry_kp * asymmetry_moment;
