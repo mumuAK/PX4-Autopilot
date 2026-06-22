@@ -1,141 +1,196 @@
-<p align="center">
-  <a href="https://px4.io">
-    <img src="docs/assets/site/px4_logo.svg" alt="PX4 Autopilot" width="240">
-  </a>
-</p>
+# A320 自动驾驶系统
 
-<p align="center">
-  <em>The autopilot stack the industry builds on.</em>
-</p>
+A320 自动驾驶系统是一个基于 C++ 的固定翼飞行仿真自动驾驶模块，实现了空客 A320 的核心自动驾驶功能。
 
-<p align="center">
-  <a href="https://github.com/PX4/PX4-Autopilot/releases"><img src="https://img.shields.io/github/release/PX4/PX4-Autopilot.svg" alt="Release"></a>
-  <a href="https://zenodo.org/badge/latestdoi/22634/PX4/PX4-Autopilot"><img src="https://zenodo.org/badge/22634/PX4/PX4-Autopilot.svg" alt="DOI"></a>
-  <a href="https://discord.gg/dronecode"><img src="https://img.shields.io/discord/1022170275984457759?label=discord&logo=discord&logoColor=white&color=5865F2" alt="Discord"></a>
-</p>
+## 功能特性
 
-<p align="center">
-  <a href="https://www.bestpractices.dev/projects/6520"><img src="https://www.bestpractices.dev/projects/6520/badge" alt="OpenSSF Best Practices"></a>
-  <a href="https://insights.linuxfoundation.org/project/px4"><img src="https://insights.linuxfoundation.org/api/badge/health-score?project=px4" alt="LFX Health Score"></a>
-  <a href="https://insights.linuxfoundation.org/project/px4"><img src="https://insights.linuxfoundation.org/api/badge/contributors?project=px4" alt="LFX Contributors"></a>
-  <a href="https://insights.linuxfoundation.org/project/px4"><img src="https://insights.linuxfoundation.org/api/badge/active-contributors?project=px4" alt="LFX Active Contributors"></a>
-</p>
+- **姿态保持 (ATT_HOLD)** - 保持当前俯仰姿态
+- **航向保持 (HDG_HOLD)** - 保持目标航向
+- **高度保持 (ALT_HOLD)** - 保持目标高度
+- **垂直速度控制 (VS_HOLD)** - 保持目标爬升率/下降率
+- **速度保持 (SPD_HOLD)** - 保持目标空速
+- **复飞 (GO_AROUND)** - 完整的复飞状态机
 
----
+## 架构设计
 
-## About
-
-PX4 is an open-source autopilot stack for drones and unmanned vehicles. It supports multirotors, fixed-wing, VTOL, rovers, and many more experimental platforms from racing quads to industrial survey aircraft. It runs on [NuttX](https://nuttx.apache.org/), Linux, and macOS. Licensed under [BSD 3-Clause](LICENSE).
-
-## Why PX4
-
-**Modular architecture.** PX4 is built around [uORB](https://docs.px4.io/main/en/middleware/uorb.html), a [DDS](https://docs.px4.io/main/en/middleware/uxrce_dds.html)-compatible publish/subscribe middleware. Modules are fully parallelized and thread safe. You can build custom configurations and trim what you don't need.
-
-**Wide hardware support.** PX4 runs on a wide range of [autopilot boards](https://docs.px4.io/main/en/flight_controller/) and supports an extensive set of sensors, telemetry radios, and actuators through the [Pixhawk](https://pixhawk.org/) ecosystem.
-
-**Developer friendly.** First-class support for [MAVLink](https://mavlink.io/) and [DDS / ROS 2](https://docs.px4.io/main/en/ros2/) integration. Comprehensive [SITL simulation](https://docs.px4.io/main/en/simulation/), hardware-in-the-loop testing, and [log analysis](https://docs.px4.io/main/en/log/flight_log_analysis.html) tools. An active developer community on [Discord](https://discord.gg/dronecode) and the [weekly dev call](https://docs.px4.io/main/en/contribute/).
-
-**Vendor neutral governance.** PX4 is hosted under the [Dronecode Foundation](https://www.dronecode.org/), part of the Linux Foundation. Business-friendly BSD-3 license. No single vendor controls the roadmap.
-
-## Supported Vehicles
-
-<table>
-  <tr>
-    <td align="center">
-      <a href="https://docs.px4.io/main/en/frames_multicopter/">
-        <img src="docs/assets/airframes/types/QuadRotorX.svg" width="50" alt="Multicopter"><br>
-        <sub>Multicopter</sub>
-      </a>
-    </td>
-    <td align="center">
-      <a href="https://docs.px4.io/main/en/frames_plane/">
-        <img src="docs/assets/airframes/types/Plane.svg" width="50" alt="Fixed Wing"><br>
-        <sub>Fixed Wing</sub>
-      </a>
-    </td>
-    <td align="center">
-      <a href="https://docs.px4.io/main/en/frames_vtol/">
-        <img src="docs/assets/airframes/types/VTOLPlane.svg" width="50" alt="VTOL"><br>
-        <sub>VTOL</sub>
-      </a>
-    </td>
-    <td align="center">
-      <a href="https://docs.px4.io/main/en/frames_rover/">
-        <img src="docs/assets/airframes/types/Rover.svg" width="50" alt="Rover"><br>
-        <sub>Rover</sub>
-      </a>
-    </td>
-  </tr>
-</table>
-
-<sub>…and many more: helicopters, autogyros, airships, submarines, boats, and other experimental platforms. These frames have basic support but are not part of the regular flight-test program. See the <a href="https://docs.px4.io/main/en/airframes/airframe_reference.html">full airframe reference</a>.</sub>
-
-## Try PX4
-
-Run PX4 in simulation with a single command. No build tools, no dependencies beyond Docker:
-
-```bash
-docker run --rm -it -p 14550:14550/udp px4io/px4-sitl:latest
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      test_driver (主控类)                   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │ map_in   │  │  step    │  │ map_out  │  │execute_cmd│  │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘   │
+└───────┼─────────────┼─────────────┼─────────────┼─────────┘
+        │             │             │             │
+        ▼             ▼             ▼             ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  AutoFlightSystem (AFS)                    │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌───────────┐   │
+│  │FlightControlComp│  │  Autothrottle  │  │  FMS     │   │
+│  │     (FCC)       │  │                 │  │           │   │
+│  └────────┬────────┘  └────────┬────────┘  └─────┬─────┘   │
+│           │                    │                  │         │
+│           ▼                    ▼                  ▼         │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │         GoAroundController (复飞状态机)             │   │
+│  │  INITIAL_ROTATION → CLIMB_OUT_V2 → ACCELERATION   │   │
+│  │  → CLIMB_OUT → TRANSITION_TO_CLIMB                │   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-Open [QGroundControl](https://qgroundcontrol.com) and fly. See [PX4 Simulation Quickstart](https://docs.px4.io/main/en/simulation/px4_simulation_quickstart) for more options.
+## 文件结构
 
-## Build from Source
+| 文件 | 描述 |
+|------|------|
+| `a320_autopilot_common.h` | 公共类型定义（AircraftState, ControlCommand 等） |
+| `a320_autothrottle.h/cpp` | 自动油门控制器 |
+| `a320_goaround.h/cpp` | 复飞控制器 |
+| `a320_fcc.h/cpp` | 飞行控制计算机 |
+| `a320_fms.h/cpp` | 飞行管理系统 |
+| `a320_afs.h/cpp` | 自动飞行系统（整合模块） |
+| `test_driver.h/cpp` | 主控类（外部接口） |
+| `test_driver_demo.cpp` | 演示程序 |
+
+## 快速开始
+
+### 编译
 
 ```bash
-git clone https://github.com/PX4/PX4-Autopilot.git --recursive
-cd PX4-Autopilot
-make px4_sitl
+g++ -std=c++17 -Wall -Wextra -I/usr/include/eigen3 -I. \
+    a320_autothrottle.cpp a320_goaround.cpp a320_fcc.cpp \
+    a320_fms.cpp a320_afs.cpp test_driver.cpp test_driver_demo.cpp \
+    -o a320_autopilot_demo
 ```
 
-> [!NOTE]
-> See the [Development Guide](https://docs.px4.io/main/en/development/development.html) for toolchain setup and build options.
+### 运行演示
 
-## Documentation & Resources
+```bash
+./a320_autopilot_demo
+```
 
-| Resource | Description |
-| --- | --- |
-| [User Guide](https://docs.px4.io/main/en/) | Build, configure, and fly with PX4 |
-| [Developer Guide](https://docs.px4.io/main/en/development/development.html) | Modify the flight stack, add peripherals, port to new hardware |
-| [Airframe Reference](https://docs.px4.io/main/en/airframes/airframe_reference.html) | Full list of supported frames |
-| [Autopilot Hardware](https://docs.px4.io/main/en/flight_controller/) | Compatible flight controllers |
-| [Release Notes](https://docs.px4.io/main/en/releases/) | What's new in each release |
-| [Contribution Guide](https://docs.px4.io/main/en/contribute/) | How to contribute to PX4 |
+## API 使用
 
-## Community
+### 基本流程
 
-- **Weekly Dev Call** — open to all developers ([Dronecode calendar](https://www.dronecode.org/calendar/))
-- **Discord** — [Join the Dronecode server](https://discord.gg/dronecode)
-- **Discussion Forum** — [PX4 Discuss](https://discuss.px4.io/)
-- **Maintainers** — see [`MAINTAINERS.md`](MAINTAINERS.md)
-- **Contributor Stats** — [LFX Insights](https://insights.lfx.linuxfoundation.org/foundation/dronecode)
+```cpp
+#include "test_driver.h"
 
-## Contributing
+// 创建主控类
+test_driver driver;
+driver.init();
 
-We welcome contributions of all kinds — bug reports, documentation, new features, and code reviews. Please read the [Contribution Guide](https://docs.px4.io/main/en/contribute/) to get started.
+// 设置初始状态
+AircraftState state = {...};
 
-## Citation
+// 启用自动驾驶和自动油门
+driver.execute_command("AP_ON");
+driver.execute_command("AT_ON");
 
-If you use PX4 in academic work, please cite it. BibTeX:
+// 设置飞行模式和目标参数
+driver.execute_command("SET_ALT", 5000.0f);
+driver.execute_command("ALT_HOLD");
 
-```bibtex
-@software{px4_autopilot,
-  author    = {Meier, Lorenz and {The PX4 Contributors}},
-  title     = {{PX4 Autopilot}},
-  publisher = {Zenodo},
-  doi       = {10.5281/zenodo.595432},
-  url       = {https://px4.io}
+// 主循环
+while (running) {
+    // 输入当前状态
+    driver.map_in(state);
+    
+    // 执行控制计算
+    driver.step(0.05f);
+    
+    // 获取控制指令
+    ControlCommand cmd;
+    driver.map_out(cmd);
+    
+    // 应用控制指令到飞机模型
+    applyControl(cmd);
 }
 ```
 
-The DOI above is a Zenodo concept DOI that always resolves to the latest release. For a version-pinned citation, see the [Zenodo record](https://doi.org/10.5281/zenodo.595432) or our [`CITATION.cff`](CITATION.cff).
+### 支持的命令
 
-## Governance
+| 命令 | 参数 | 功能 |
+|------|------|------|
+| `AP_ON` | - | 启用自动驾驶 |
+| `AP_OFF` | - | 禁用自动驾驶 |
+| `AT_ON` | - | 启用自动油门 |
+| `AT_OFF` | - | 禁用自动油门 |
+| `HDG_HOLD` | - | 航向保持模式 |
+| `ALT_HOLD` | - | 高度保持模式 |
+| `VS_HOLD` | - | 垂直速度模式 |
+| `SPD_HOLD` | - | 速度保持模式 |
+| `ATT_HOLD` | - | 姿态保持模式 |
+| `GO_AROUND` | - | 复飞模式 |
+| `CLIMB` | - | 爬升模式 |
+| `DESCENT` | - | 下降模式 |
+| `SET_HDG` | 角度(°) | 设置目标航向 |
+| `SET_ALT` | 高度(ft) | 设置目标高度 |
+| `SET_VS` | 爬升率(fpm) | 设置目标垂直速度 |
+| `SET_SPD` | 速度(knots) | 设置目标速度 |
+| `SET_MACH` | 马赫数 | 设置目标马赫 |
 
-The PX4 Autopilot project is hosted by the [Dronecode Foundation](https://www.dronecode.org/), a [Linux Foundation](https://www.linuxfoundation.org/) Collaborative Project. Dronecode holds all PX4 trademarks and serves as the project's legal guardian, ensuring vendor-neutral stewardship — no single company owns the name or controls the roadmap. The source code is licensed under the [BSD 3-Clause](LICENSE) license, so you are free to use, modify, and distribute it in your own projects.
+## 核心数据结构
 
-<p align="center">
-  <a href="https://www.dronecode.org/">
-    <img src="docs/assets/site/dronecode_logo.svg" alt="Dronecode Logo" width="180">
-  </a>
-</p>
+### AircraftState
+
+飞机状态结构体，包含位置、速度、姿态、发动机参数等：
+
+```cpp
+struct AircraftState {
+    double lat, lon;           // 经纬度
+    float alt_msl, alt_std;    // 高度
+    float tas, cas, mach;      // 速度
+    float roll, pitch, yaw;    // 姿态角
+    float n1_left, n1_right;   // 发动机转速
+    float aoa, alpha_prot;     // 迎角和迎角保护
+    // ...
+};
+```
+
+### ControlCommand
+
+控制指令结构体：
+
+```cpp
+struct ControlCommand {
+    float roll_cmd;      // 滚转角指令 (rad)
+    float pitch_cmd;     // 俯仰角指令 (rad)
+    float yaw_cmd;       // 航向角指令 (rad)
+    float throttle_cmd;  // 油门指令 (0-100%)
+    float flap_cmd;      // 襟翼指令
+    float gear_cmd;      // 起落架指令
+};
+```
+
+## 复飞状态机
+
+复飞程序包含五个阶段：
+
+| 阶段 | 条件 | 特征 |
+|------|------|------|
+| INITIAL_ROTATION | 0-3秒 | 快速抬头至15° |
+| CLIMB_OUT_V2 | < 400ft | 保持 V2+10 速度 |
+| ACCELERATION | 400-1500ft | 允许收襟翼，加速 |
+| CLIMB_OUT | 1500-3000ft | 允许收起落架 |
+| TRANSITION_TO_CLIMB | > 3000ft | 完成复飞，切换到正常爬升 |
+
+## 飞行包线保护
+
+系统实现了以下保护功能：
+
+- **迎角保护** - 接近 alpha_prot 时自动推杆
+- **超速保护** - 马赫数 > 0.86 时减小油门
+- **低速保护** - 速度 < 140kts 时增加油门
+
+## 依赖
+
+- C++17 或更高版本
+- Eigen3（可选，当前代码未实际使用）
+
+## 许可证
+
+MIT License
+
+## 作者
+
+AutoGen
