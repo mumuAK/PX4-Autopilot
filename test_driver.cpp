@@ -1,3 +1,8 @@
+/**
+ * @file test_driver.cpp
+ * @brief A320 自动驾驶系统主控类实现
+ */
+
 #include "test_driver.h"
 #include <string>
 
@@ -49,6 +54,12 @@ void test_driver::execute_command(const std::string& command, float value) {
         _afs.setAFMode(AFMode::CLIMB);
     } else if (command == "DESCENT") {
         _afs.setAFMode(AFMode::DESCENT);
+    } else if (command == "GROUND_TRACK") {
+        _afs.setAFMode(AFMode::GROUND_TRACK);
+    } else if (command == "ENGINE_OUT_LEFT") {
+        _afs.activateEngineOut(_current_state, "LEFT");
+    } else if (command == "ENGINE_OUT_RIGHT") {
+        _afs.activateEngineOut(_current_state, "RIGHT");
     } else if (command == "SET_HDG") {
         _afs.setTargetHeading(value);
     } else if (command == "SET_ALT") {
@@ -59,6 +70,8 @@ void test_driver::execute_command(const std::string& command, float value) {
         _afs.setTargetSpeed(value);
     } else if (command == "SET_MACH") {
         _afs.setTargetMach(value);
+    } else if (command == "SET_RWY_HDG") {
+        _afs.setRunwayHeading(value);
     }
 }
 

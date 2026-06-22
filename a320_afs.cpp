@@ -1,3 +1,8 @@
+/**
+ * @file a320_afs.cpp
+ * @brief A320 自动飞行系统实现
+ */
+
 #include "a320_afs.h"
 
 namespace A320 {
@@ -65,10 +70,20 @@ void AutoFlightSystem::setTargetHeading(float heading_deg) {
     _fms.setTargetHeading(heading_deg);
 }
 
+void AutoFlightSystem::setRunwayHeading(float runway_heading_deg) {
+    _fcc.setRunwayHeading(runway_heading_deg);
+}
+
 void AutoFlightSystem::activateGoAround(const AircraftState& state) {
     _fcc.activateGoAround(state);
     _autothrottle.setFlightPhase(FlightPhase::GO_AROUND);
     _autothrottle.setTargetSpeed(_fcc.getGoAroundController().getTargetSpeed());
+}
+
+void AutoFlightSystem::activateEngineOut(const AircraftState& state, const std::string& failed_side) {
+    _fcc.activateEngineOut(state, failed_side);
+    _autothrottle.setFlightPhase(FlightPhase::CLIMB);
+    _autothrottle.setTargetThrust(_fcc.getEngineOutController().getTargetThrust());
 }
 
 void AutoFlightSystem::update(const AircraftState& state) {
@@ -78,9 +93,7 @@ void AutoFlightSystem::update(const AircraftState& state) {
         handleModeTransitions(state);
 
         ControlCommand cmd = _fcc.computeControl(state);
-        _control_command.pitch_cmd = cmd.pitch_cmd;
-        _control_command.roll_cmd = cmd.roll_cmd;
-        _control_command.yaw_cmd = 0.0f;
+        _control_command = cmd;
     }
 
     if (_at_enabled) {
@@ -98,6 +111,13 @@ void AutoFlightSystem::handleModeTransitions(const AircraftState& state) {
             setAFMode(AFMode::VERTICAL_SPEED);
             setTargetVerticalSpeed(_fcc.getGoAroundController().getTargetVerticalSpeed());
             setTargetSpeed(_fcc.getGoAroundController().getTargetSpeed());
+        }
+    }
+
+    // 单发失效稳定后可以切换到正常爬升
+    if (current_mode == AFMode::ENGINE_OUT) {
+        if (_fcc.getEngineOutController().isStabilized()) {
+            // 保持单发模式，但可以调整目标参数
         }
     }
 }
