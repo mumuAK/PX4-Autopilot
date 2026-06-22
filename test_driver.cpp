@@ -4,7 +4,6 @@
  */
 
 #include "test_driver.h"
-#include <string>
 
 namespace A320 {
 
@@ -68,8 +67,6 @@ void test_driver::execute_command(const std::string& command, float value) {
         _afs.setTargetVerticalSpeed(value);
     } else if (command == "SET_SPD") {
         _afs.setTargetSpeed(value);
-    } else if (command == "SET_MACH") {
-        _afs.setTargetMach(value);
     } else if (command == "SET_RWY_HDG") {
         _afs.setRunwayHeading(value);
     }

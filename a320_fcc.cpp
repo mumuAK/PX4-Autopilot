@@ -36,27 +36,14 @@ void FlightControlComputer::setAFMode(AFMode mode) {
     _current_mode = mode;
 }
 
-void FlightControlComputer::setTargetAltitude(float altitude_ft) {
-    _target_altitude = altitude_ft;
-}
-
-void FlightControlComputer::setTargetVerticalSpeed(float vs_fpm) {
-    _target_vs = vs_fpm;
-}
-
-void FlightControlComputer::setTargetSpeed(float speed_knots) {
-    _target_speed = speed_knots;
-}
-
-void FlightControlComputer::setTargetMach(float mach) {
-    _target_mach = mach;
-}
-
+void FlightControlComputer::setTargetAltitude(float altitude_ft) { _target_altitude = altitude_ft; }
+void FlightControlComputer::setTargetVerticalSpeed(float vs_fpm) { _target_vs = vs_fpm; }
+void FlightControlComputer::setTargetSpeed(float speed_knots) { _target_speed = speed_knots; }
+void FlightControlComputer::setTargetMach(float mach) { _target_mach = mach; }
 void FlightControlComputer::setTargetHeading(float heading_deg) {
     _target_heading = heading_deg;
     _ground_control.setTargetHeading(heading_deg);
 }
-
 void FlightControlComputer::setRunwayHeading(float runway_heading_deg) {
     _runway_heading = runway_heading_deg;
     _ground_control.setRunwayHeading(runway_heading_deg);
@@ -69,89 +56,57 @@ void FlightControlComputer::activateGoAround(const AircraftState& state) {
 
 void FlightControlComputer::activateEngineOut(const AircraftState& state, const std::string& failed_side) {
     _engine_out.activate(state, failed_side);
-    _current_mode = AFMode::ENGINE_OUT;
+    // 不切换模式，保持当前模式
 }
 
 ControlCommand FlightControlComputer::computeControl(const AircraftState& state) {
     ControlCommand cmd = {};
     float dt = 0.05f;
 
-    // 检查是否需要特殊控制模式
-    bool need_ground_control = isGroundControlNeeded(state);
-    bool need_engine_out = isEngineOutCompensationNeeded(state);
-
-    // 优先处理单发失效
-    if (need_engine_out || _current_mode == AFMode::ENGINE_OUT) {
-        engineOutControl(state, cmd, dt);
-        return cmd;
-    }
-
     // 地面控制
-    if (need_ground_control || _current_mode == AFMode::GROUND_TRACK) {
+    if (isGroundControlNeeded(state) || _current_mode == AFMode::GROUND_TRACK) {
         groundTrackControl(state, cmd, dt);
         return cmd;
     }
 
-    // 空中控制
+    // 空中控制（姿态、航向、高度、速度等）
     switch (_current_mode) {
         case AFMode::OFF:
             cmd.pitch_cmd = state.pitch;
             cmd.roll_cmd = 0.0f;
-            cmd.yaw_cmd = 0.0f;
             break;
 
         case AFMode::ATTITUDE_HOLD:
             cmd.pitch_cmd = attitudeHoldControl(state);
             cmd.roll_cmd = 0.0f;
-            cmd.yaw_cmd = 0.0f;
             break;
 
         case AFMode::HEADING_HOLD:
             cmd.pitch_cmd = attitudeHoldControl(state);
             cmd.roll_cmd = headingHoldControl(state);
-            cmd.yaw_cmd = 0.0f;
             break;
 
         case AFMode::ALTITUDE_HOLD:
             cmd.pitch_cmd = altitudeHoldControl(state);
             cmd.roll_cmd = headingHoldControl(state);
-            cmd.yaw_cmd = 0.0f;
             break;
 
         case AFMode::VERTICAL_SPEED:
-            cmd.pitch_cmd = verticalSpeedControl(state);
-            cmd.roll_cmd = headingHoldControl(state);
-            cmd.yaw_cmd = 0.0f;
-            break;
-
-        case AFMode::SPEED_HOLD:
-            cmd.pitch_cmd = speedHoldControl(state);
-            cmd.roll_cmd = headingHoldControl(state);
-            cmd.yaw_cmd = 0.0f;
-            break;
-
-        case AFMode::MACH_HOLD:
-            cmd.pitch_cmd = speedHoldControl(state);
-            cmd.roll_cmd = headingHoldControl(state);
-            cmd.yaw_cmd = 0.0f;
-            break;
-
         case AFMode::CLIMB:
-            cmd.pitch_cmd = verticalSpeedControl(state);
-            cmd.roll_cmd = headingHoldControl(state);
-            cmd.yaw_cmd = 0.0f;
-            break;
-
         case AFMode::DESCENT:
             cmd.pitch_cmd = verticalSpeedControl(state);
             cmd.roll_cmd = headingHoldControl(state);
-            cmd.yaw_cmd = 0.0f;
+            break;
+
+        case AFMode::SPEED_HOLD:
+        case AFMode::MACH_HOLD:
+            cmd.pitch_cmd = speedHoldControl(state);
+            cmd.roll_cmd = headingHoldControl(state);
             break;
 
         case AFMode::GO_AROUND:
             cmd.pitch_cmd = goAroundControl(state);
             cmd.roll_cmd = _go_around.getRollCommand();
-            cmd.yaw_cmd = 0.0f;
             break;
 
         case AFMode::GROUND_TRACK:
@@ -159,12 +114,17 @@ ControlCommand FlightControlComputer::computeControl(const AircraftState& state)
             break;
 
         case AFMode::ENGINE_OUT:
-            engineOutControl(state, cmd, dt);
+            // 保持原有模式，仅叠加脚蹬补偿
             break;
     }
 
     cmd.pitch_cmd = limitPitch(cmd.pitch_cmd);
     cmd.roll_cmd = limitRoll(cmd.roll_cmd);
+
+    // 单发失效脚蹬补偿（叠加在原有控制器输出上）
+    if (_engine_out.isActive()) {
+        applyEngineOutCompensation(state, cmd, dt);
+    }
 
     return cmd;
 }
@@ -175,6 +135,10 @@ float FlightControlComputer::limitPitch(float pitch_rad) const {
 
 float FlightControlComputer::limitRoll(float roll_rad) const {
     return Utils::constrain(roll_rad, -30.0f * DEG_TO_RAD, 30.0f * DEG_TO_RAD);
+}
+
+float FlightControlComputer::limitRudder(float rudder_rad) const {
+    return Utils::constrain(rudder_rad, -25.0f * DEG_TO_RAD, 25.0f * DEG_TO_RAD);
 }
 
 float FlightControlComputer::altitudeHoldControl(const AircraftState& state) {
@@ -273,60 +237,29 @@ float FlightControlComputer::goAroundControl(const AircraftState& state) {
 }
 
 void FlightControlComputer::groundTrackControl(const AircraftState& state, ControlCommand& cmd, float dt) {
-    // 设置目标航向
     _ground_control.setTargetHeading(_target_heading);
-
-    // 更新地面控制器
     _ground_control.update(state, dt);
 
-    // 获取控制指令
     cmd.nws_cmd = _ground_control.getNWSCommand();
     cmd.rudder_cmd = _ground_control.getRudderCommand();
     cmd.differential_brake_left = _ground_control.getLeftBrakeCommand();
     cmd.differential_brake_right = _ground_control.getRightBrakeCommand();
 
-    // 地面控制时，俯仰保持为零（或根据需要调整）
     cmd.pitch_cmd = 0.0f;
     cmd.roll_cmd = 0.0f;
 }
 
-void FlightControlComputer::engineOutControl(const AircraftState& state, ControlCommand& cmd, float dt) {
-    // 更新单发失效控制器
+void FlightControlComputer::applyEngineOutCompensation(const AircraftState& state, ControlCommand& cmd, float dt) {
+    // 更新单发补偿控制器
     _engine_out.update(state, dt);
 
-    // 获取配平指令
-    cmd.rudder_trim = _engine_out.getRudderTrim();
-    cmd.aileron_trim = _engine_out.getAileronTrim();
-    cmd.rudder_cmd = _engine_out.getRudderCommand();
-
-    // 单发失效时的俯仰控制（保持速度）
-    float target_speed = _engine_out.getTargetSpeed();
-    float current_speed = state.cas * MS_TO_KNOTS;
-    float speed_error = target_speed - current_speed;
-
-    float dt_pitch = 0.05f;
-    _speed_integral += speed_error * dt_pitch;
-    _speed_integral = Utils::constrain(_speed_integral, -500.0f, 500.0f);
-    cmd.pitch_cmd = _gains.speed_kp * speed_error + _gains.speed_ki * _speed_integral;
-    cmd.pitch_cmd = limitPitch(cmd.pitch_cmd * DEG_TO_RAD);
-
-    // 单发失效时的滚转控制（保持机翼水平）
-    float roll_error = 0.0f - state.roll;
-    cmd.roll_cmd = _gains.roll_kp * roll_error + cmd.aileron_trim;
-    cmd.roll_cmd = limitRoll(cmd.roll_cmd);
-
-    // 单发失效时的推力控制
-    cmd.throttle_cmd = _engine_out.getTargetThrust();
+    // 叠加方向舵配平到原有指令上
+    cmd.rudder_cmd += _engine_out.getRudderTrim();
+    cmd.rudder_cmd = limitRudder(cmd.rudder_cmd);
 }
 
 bool FlightControlComputer::isGroundControlNeeded(const AircraftState& state) const {
-    // 不在空中且速度大于 0
     return !state.is_in_air && state.groundspeed > 0.1f;
-}
-
-bool FlightControlComputer::isEngineOutCompensationNeeded(const AircraftState& state) const {
-    // 任一发动机失效
-    return state.engine_left_failed || state.engine_right_failed;
 }
 
 } // namespace A320

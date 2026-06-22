@@ -18,10 +18,7 @@ void AutoFlightSystem::initialize() {
     _fms.initialize();
 }
 
-void AutoFlightSystem::enableAutopilot() {
-    _ap_enabled = true;
-}
-
+void AutoFlightSystem::enableAutopilot() { _ap_enabled = true; }
 void AutoFlightSystem::disableAutopilot() {
     _ap_enabled = false;
     _fcc.setAFMode(AFMode::OFF);
@@ -77,86 +74,43 @@ void AutoFlightSystem::setRunwayHeading(float runway_heading_deg) {
 void AutoFlightSystem::activateGoAround(const AircraftState& state) {
     _fcc.activateGoAround(state);
     _autothrottle.setFlightPhase(FlightPhase::GO_AROUND);
-    _autothrottle.setTargetSpeed(_fcc.getGoAroundController().getTargetSpeed());
 }
 
 void AutoFlightSystem::activateEngineOut(const AircraftState& state, const std::string& failed_side) {
     _fcc.activateEngineOut(state, failed_side);
-    _autothrottle.setFlightPhase(FlightPhase::CLIMB);
-    _autothrottle.setTargetThrust(_fcc.getEngineOutController().getTargetThrust());
 }
 
 void AutoFlightSystem::update(const AircraftState& state) {
     _control_command = {};
 
+    // 自动驾驶控制
     if (_ap_enabled) {
         handleModeTransitions(state);
-
-        ControlCommand cmd = _fcc.computeControl(state);
-        _control_command = cmd;
+        _control_command = _fcc.computeControl(state);
     }
 
-    // 自动油门控制逻辑：
-    // - 单发失效模式：使用左右分别推力控制，AT 不干预
-    // - 复飞模式：使用固定 TO/GA 推力（95%），AT 不干预
-    // - 其他模式：正常 AT 速度/马赫控制
-    bool at_should_override = true;
-    if (_fcc.getAFMode() == AFMode::ENGINE_OUT) {
-        // 单发失效模式：使用左右分别推力
-        at_should_override = false;
-        float engine_out_thrust = _fcc.getEngineOutController().getTargetThrust();
-        if (_fcc.getEngineOutController().isLeftEngineFailed()) {
-            // 左发失效：右发 MCT，左发 0
-            _control_command.throttle_left = 0.0f;
-            _control_command.throttle_right = engine_out_thrust;
-        } else {
-            // 右发失效：左发 MCT，右发 0
-            _control_command.throttle_left = engine_out_thrust;
-            _control_command.throttle_right = 0.0f;
-        }
-    } else if (_fcc.getAFMode() == AFMode::GO_AROUND) {
-        // 复飞模式：使用固定推力
-        float speed_knots = state.cas * MS_TO_KNOTS;
-        if (speed_knots < 160.0f) {
-            at_should_override = true;
-        } else {
-            at_should_override = false;
-            // 两发都加到 TO/GA 推力
-            _control_command.throttle_left = 95.0f;
-            _control_command.throttle_right = 95.0f;
-        }
-    }
-
-    if (_at_enabled && at_should_override) {
-        float throttle = _autothrottle.computeThrottle(state);
-        _control_command.throttle_cmd = throttle;
-        _control_command.throttle_left = throttle;
-        _control_command.throttle_right = throttle;
+    // 自动油门控制（正常工作，不受单发影响）
+    if (_at_enabled) {
+        _control_command.throttle_cmd = _autothrottle.computeThrottle(state);
     }
 
     enforceFlightEnvelope(state);
 }
 
 void AutoFlightSystem::handleModeTransitions(const AircraftState& state) {
-    AFMode current_mode = _fcc.getAFMode();
+    (void)state;
 
-    if (current_mode == AFMode::GO_AROUND) {
+    if (_fcc.getAFMode() == AFMode::GO_AROUND) {
         if (_fcc.getGoAroundController().isCompleted()) {
             setAFMode(AFMode::VERTICAL_SPEED);
             setTargetVerticalSpeed(_fcc.getGoAroundController().getTargetVerticalSpeed());
             setTargetSpeed(_fcc.getGoAroundController().getTargetSpeed());
         }
     }
-
-    // 单发失效稳定后可以切换到正常爬升
-    if (current_mode == AFMode::ENGINE_OUT) {
-        if (_fcc.getEngineOutController().isStabilized()) {
-            // 保持单发模式，但可以调整目标参数
-        }
-    }
 }
 
 void AutoFlightSystem::enforceFlightEnvelope(const AircraftState& state) {
+    // 迎角保护
     if (state.aoa > state.alpha_prot * 0.85f) {
         float aoa_margin = state.alpha_prot - state.aoa;
         float pitch_reduction = std::max(0.0f, -aoa_margin * RAD_TO_DEG * 2.0f) * DEG_TO_RAD;
@@ -168,11 +122,13 @@ void AutoFlightSystem::enforceFlightEnvelope(const AircraftState& state) {
             _control_command.throttle_cmd - 3.0f, 0.0f, 100.0f);
     }
 
+    // 超速保护
     if (state.mach > 0.86f) {
         _control_command.throttle_cmd = Utils::constrain(
             _control_command.throttle_cmd - 10.0f, 0.0f, 100.0f);
     }
 
+    // 低速保护
     float speed_knots = state.cas * MS_TO_KNOTS;
     if (speed_knots < 140.0f && _fcc.getAFMode() != AFMode::GO_AROUND) {
         _control_command.throttle_cmd = Utils::constrain(
