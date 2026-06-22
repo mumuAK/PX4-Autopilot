@@ -313,80 +313,80 @@ void GoAroundController::updatePhase(const AircraftState& state) {
 float GoAroundController::computePitch(const AircraftState& state, float dt) {
     // 计算目标俯仰角
     float target_pitch = computeTargetPitch(state);
-    
+
     // 计算俯仰误差
     float pitch_error = target_pitch - state.pitch;
-    
-    // 俯仰角速度限制 - A320 复飞时抬头速率约 3-5°/s
-    float max_pitch_rate = 3.0f * DEG_TO_RAD; // 3°/s
-    float min_pitch_rate = -2.0f * DEG_TO_RAD;
-    
+
     // 使用 PID 控制器计算俯仰指令
     float proportional = _pitch_controller.kp * pitch_error;
-    
+
     _pitch_controller.integral += pitch_error * dt;
     // 积分饱和限制
     _pitch_controller.integral = Utils::constrain(
         _pitch_controller.integral, -10.0f * DEG_TO_RAD, 10.0f * DEG_TO_RAD);
     float integral = _pitch_controller.ki * _pitch_controller.integral;
-    
+
     float derivative = 0.0f;
     if (dt > 0.001f) {
         derivative = _pitch_controller.kd * (pitch_error - _pitch_controller.last_error) / dt;
     }
     _pitch_controller.last_error = pitch_error;
-    
+
+    // 计算目标俯仰增量（PID 输出）
+    float pitch_increment = proportional + integral + derivative;
+
+    // 应用俯仰速率限制（3°/s）
+    float max_pitch_rate_deg_s = 3.0f;
+    pitch_increment = Utils::limitRate(0.0f, pitch_increment, max_pitch_rate_deg_s * DEG_TO_RAD, dt);
+
     // 计算最终俯仰指令
-    float pitch_cmd = state.pitch + proportional + integral + derivative;
-    
-    // 应用俯仰速率限制（平滑过渡）
-    float rate = (pitch_cmd - state.pitch) / dt;
-    rate = Utils::constrain(rate, min_pitch_rate, max_pitch_rate);
-    pitch_cmd = state.pitch + rate * dt;
-    
+    float pitch_cmd = state.pitch + pitch_increment;
+
     // 应用复飞阶段的俯仰限制
     pitch_cmd = limitPitchForGoAround(pitch_cmd, state);
-    
+
     return pitch_cmd;
 }
 
 float GoAroundController::computeRoll(const AircraftState& state, float dt) {
     // 计算目标滚转角 - 基于航向误差
     float heading_error = Utils::wrapAngle(_target_heading - state.yaw * RAD_TO_DEG);
-    
+
     // 航向误差 -> 目标滚转角
     // A320 典型：每度航向误差约产生 2° 滚转角指令，最大 25°
     float target_roll = Utils::constrain(heading_error * 2.0f, -25.0f, 25.0f) * DEG_TO_RAD;
-    
+
     // 计算滚转误差
     float roll_error = target_roll - state.roll;
-    
+
     // PID 控制
     float proportional = _roll_controller.kp * roll_error;
-    
+
     _roll_controller.integral += roll_error * dt;
     _roll_controller.integral = Utils::constrain(
         _roll_controller.integral, -10.0f * DEG_TO_RAD, 10.0f * DEG_TO_RAD);
     float integral = _roll_controller.ki * _roll_controller.integral;
-    
+
     float derivative = 0.0f;
     if (dt > 0.001f) {
         derivative = _roll_controller.kd * (roll_error - _roll_controller.last_error) / dt;
     }
     _roll_controller.last_error = roll_error;
-    
-    float roll_cmd = proportional + integral + derivative;
-    
-    // 滚转角速率限制
-    float max_roll_rate = 5.0f * DEG_TO_RAD;
-    float rate = (roll_cmd - state.roll) / dt;
-    rate = Utils::constrain(rate, -max_roll_rate, max_roll_rate);
-    roll_cmd = state.roll + rate * dt;
-    
-    // 滚转角绝对值限制
+
+    // 计算滚转增量（PID 输出）
+    float roll_increment = proportional + integral + derivative;
+
+    // 应用滚转角速率限制（5°/s）
+    float max_roll_rate_deg_s = 5.0f;
+    roll_increment = Utils::limitRate(0.0f, roll_increment, max_roll_rate_deg_s * DEG_TO_RAD, dt);
+
+    // 计算最终滚转指令
+    float roll_cmd = state.roll + roll_increment;
+
+    // 滚转角绝对值限制（25°）
     float max_roll = 25.0f * DEG_TO_RAD;
     roll_cmd = Utils::constrain(roll_cmd, -max_roll, max_roll);
-    
+
     return roll_cmd;
 }
 
@@ -420,9 +420,12 @@ float GoAroundController::computeTargetPitch(const AircraftState& state) {
             
         case GoAroundPhase::CLIMB_OUT_V2: {
             // 低高度：速度优先，确保保持 V2+10
-            float pitch_for_vs = computePitchForVS(_target_vs - state.alt_msl * 3.281f / 60.0f);
+            // 计算当前垂直速度（用 pitch 和 TAS 估算）
+            float current_vs_fpm = std::sin(state.pitch) * state.tas / 0.3048f * 60.0f;
+            float vs_error = _target_vs - current_vs_fpm;
+            float pitch_for_vs = computePitchForVS(vs_error);
             float pitch_for_speed = computePitchForSpeed(speed_error);
-            
+
             // 速度过低时，优先保持速度（减小俯仰以加速）
             if (speed_error > 10.0f) {
                 // 速度比目标低10节以上，减小俯仰
@@ -430,39 +433,43 @@ float GoAroundController::computeTargetPitch(const AircraftState& state) {
             } else {
                 target_pitch = std::max(base_pitch, pitch_for_vs);
             }
-            
+
             // 硬限制：最大15°（FCOM 推荐）
             target_pitch = std::min(target_pitch, 15.0f * DEG_TO_RAD);
             break;
         }
-            
+
         case GoAroundPhase::ACCELERATION: {
             // 加速阶段：保持稳定爬升率，允许加速
-            float pitch_for_vs = computePitchForVS(_target_vs - state.alt_msl * 3.281f / 60.0f);
-            
+            float current_vs_fpm = std::sin(state.pitch) * state.tas / 0.3048f * 60.0f;
+            float vs_error = _target_vs - current_vs_fpm;
+            float pitch_for_vs = computePitchForVS(vs_error);
+
             // 允许速度逐渐增加
             target_pitch = pitch_for_vs;
-            
+
             // 如果速度仍低于目标，减小俯仰以加速
             if (speed_error > 5.0f) {
                 target_pitch -= (speed_error - 5.0f) * 0.1f * DEG_TO_RAD;
             }
-            
+
             // 硬限制：最大15°
             target_pitch = std::min(target_pitch, 15.0f * DEG_TO_RAD);
             break;
         }
-            
+
         case GoAroundPhase::CLIMB_OUT:
         case GoAroundPhase::TRANSITION_TO_CLIMB: {
             // 高高度：正常爬升控制
             // 以垂直速度为主，速度为辅
-            float pitch_for_vs = computePitchForVS(_target_vs - state.alt_msl * 3.281f / 60.0f);
+            float current_vs_fpm = std::sin(state.pitch) * state.tas / 0.3048f * 60.0f;
+            float vs_error = _target_vs - current_vs_fpm;
+            float pitch_for_vs = computePitchForVS(vs_error);
             float pitch_for_speed = computePitchForSpeed(speed_error);
-            
+
             // 混合两个需求
             target_pitch = blendPitchCommands(pitch_for_vs, pitch_for_speed, speed_error);
-            
+
             // 限制俯仰范围
             target_pitch = Utils::constrain(target_pitch, -5.0f * DEG_TO_RAD, 15.0f * DEG_TO_RAD);
             break;
@@ -767,18 +774,28 @@ float FlightControlComputer::speedHoldControl(const AircraftState& state) {
 }
 
 float FlightControlComputer::attitudeHoldControl(const AircraftState& state) {
-    // 姿态保持：保持当前俯仰角
-    float target_pitch = state.pitch;
+    // 姿态保持：保持激活时的俯仰角（存储在 _target_pitch 中）
+    // 如果未设置目标俯仰，则保持当前姿态
+    static float stored_pitch = 0.0f;
+    static bool pitch_stored = false;
+
+    // 首次进入姿态保持模式时，记录当前俯仰角作为目标
+    if (!pitch_stored || _current_mode != AFMode::ATTITUDE_HOLD) {
+        stored_pitch = state.pitch;
+        pitch_stored = true;
+    }
+
+    float target_pitch = stored_pitch;
     float error = target_pitch - state.pitch;
-    
+
     float dt = 0.05f;
     _pitch_integral += error * dt;
     _pitch_integral = Utils::constrain(_pitch_integral, -0.5f, 0.5f);
-    
+
     float pitch_cmd = _gains.pitch_kp * error +
                       _gains.pitch_ki * _pitch_integral -
                       _gains.pitch_kd * state.pitch_rate;
-    
+
     return limitPitch(pitch_cmd);
 }
 
@@ -958,6 +975,8 @@ void AutoFlightSystem::setTargetMach(float mach) {
 void AutoFlightSystem::activateGoAround(const AircraftState& state) {
     _fcc.activateGoAround(state);            // 初始化复飞状态机（需要 state）
     _autothrottle.setFlightPhase(FlightPhase::GO_AROUND);
+    // 同步自动油门的目标速度（复飞阶段虽用固定推力，但过渡后需要）
+    _autothrottle.setTargetSpeed(_fcc.getGoAroundController().getTargetSpeed());
 }
 
 float AutoFlightSystem::getGoAroundTargetSpeed() const {
@@ -992,17 +1011,31 @@ void AutoFlightSystem::handleModeTransitions(const AircraftState& state) {
 }
 
 void AutoFlightSystem::enforceFlightEnvelope(const AircraftState& state) {
-    // 迎角保护
-    if (state.aoa > state.alpha_prot * 0.9f) {
-        // 减小油门，增加俯仰
+    // 迎角保护：接近 alpha_prot 时减小俯仰角以降低迎角
+    if (state.aoa > state.alpha_prot * 0.85f) {
+        // 迎角过大：减小俯仰角指令（推杆），防止失速
+        float aoa_margin = state.alpha_prot - state.aoa;
+        float pitch_reduction = std::max(0.0f, -aoa_margin * RAD_TO_DEG * 2.0f) * DEG_TO_RAD;
+        _control_command.pitch_cmd = Utils::constrain(
+            _control_command.pitch_cmd - pitch_reduction,
+            -15.0f * DEG_TO_RAD, 10.0f * DEG_TO_RAD);
+
+        // 同时减小油门（避免加速导致迎角进一步增大）
         _control_command.throttle_cmd = Utils::constrain(
-            _control_command.throttle_cmd - 5.0f, 0.0f, 100.0f);
+            _control_command.throttle_cmd - 3.0f, 0.0f, 100.0f);
     }
-    
-    // 超速保护
+
+    // 超速保护：马赫数超过 0.86 时减小油门
     if (state.mach > 0.86f) {
         _control_command.throttle_cmd = Utils::constrain(
             _control_command.throttle_cmd - 10.0f, 0.0f, 100.0f);
+    }
+
+    // 低速保护：速度过低时增加油门
+    float speed_knots = state.cas * MS_TO_KNOTS;
+    if (speed_knots < 140.0f && _fcc.getAFMode() != AFMode::GO_AROUND) {
+        _control_command.throttle_cmd = Utils::constrain(
+            _control_command.throttle_cmd + 5.0f, 0.0f, 100.0f);
     }
 }
 
