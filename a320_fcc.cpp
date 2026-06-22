@@ -237,8 +237,10 @@ float FlightControlComputer::goAroundControl(const AircraftState& state) {
 }
 
 void FlightControlComputer::groundTrackControl(const AircraftState& state, ControlCommand& cmd, float dt) {
+    (void)dt;
     _ground_control.setTargetHeading(_target_heading);
-    _ground_control.update(state, dt);
+    _ground_control.setTargetSpeed(_target_speed);
+    _ground_control.update(state, 0.05f);
 
     cmd.nws_cmd = _ground_control.getNWSCommand();
     cmd.rudder_cmd = _ground_control.getRudderCommand();
